@@ -56,6 +56,7 @@ const (
 	mIND AddressingMode = "IND" //Indirect
 	mIDX AddressingMode = "IDX" //IndirectX
 	mIDY AddressingMode = "IDY" //IndirectY
+	mIMM AddressingMode = "IMM" //Immediate
 )
 
 func (c *CPU) Read16(address uint16) uint16 {
@@ -125,6 +126,8 @@ func (c *CPU) getModeInfo(mode AddressingMode) (uint16, uint8, bool) {
 			address = c.PC + uint16(c.Read(c.PC)) - 1
 			operand = c.Read(c.PC)
 		}
+	case mIMM:
+		operand = c.Read(c.PC)
 	}
 	return address, operand, pageCrossed
 }
@@ -150,8 +153,13 @@ var opcodeNameMatrix [256]string = [256]string{
 }
 
 var opcodeAddrMode [256]AddressingMode = [256]AddressingMode{
-	//x0  x1    x2     x3     x4     x5     x6     x7     x8     x9     xA     xB     xC     xD     xE     xF
-	mIMP, mIDX, mIMP,
+	//x0  x1    x2    x3    x4    x5    x6    x7    x8    x9    xA    xB    xC    xD    xE    xF
+	mIMP, mIDX, mIMP, mIDX, mZP0, mZP0, mZP0, mZP0, mIMP, mIMM, mIMP, mIMM, mABS, mABS, mABS, mABS,
+	mREL, mIDY, mIMP, mIDY, mZPX, mZPX, mZPX, mZPX, mIMP, mABY, mIMP, mABY, mABX, mABX, mABX, mABX,
+	mABS, mIDX, mIMP, mIDX, mZP0, mZP0, mZP0, mZP0, mIMP, mIMM, mIMP, mIMM, mABS, mABS, mABS, mABS,
+	mREL, mIDY, mIMP, mIDY, mZPX, mZPX, mZPX, mZPX, mIMP, mABY, mIMP, mABY, mABX, mABX, mABX, mABX,
+	mIMP, mIDX, mIMP, mIDX, mZP0, mZP0, mZP0, mZP0, mIMP, mIMM, mIMP, mIMM, mABS, mABS, mABS, mABS,
+	mREL, mIDY, mIMP, mIDY, mZPX, mZPX, mZPX, mZPX, mIMP, mABY, mIMP, mABY, mABX,
 }
 
 func (c *CPU) clock() {
