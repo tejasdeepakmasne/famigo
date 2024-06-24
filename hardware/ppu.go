@@ -42,6 +42,30 @@ func (p *PPU) Step(cycles uint16) {
 	}
 }
 
+func (p * PPU) Read(address uint16) uint8 {
+	switch {
+		case address < 0x2000:
+			return p.VRAM[address]
+		case address < 0x3F00:
+			return p.VRAM[address % 0x0800 + 0x2000]
+		case address < 0x4000:
+			return p.VRAM[address % 0x20 + 0x3F00]
+		default:
+			return 0
+	}
+}
+
+func (p *PPU) Write(address uint16, value uint8) {
+	switch {
+		case address < 0x2000:
+			p.VRAM[address] = value
+		case address < 0x3F00:
+			p.VRAM[address % 0x0800 + 0x2000] = value
+		case address < 0x4000:
+			p.VRAM[address % 0x20 + 0x3F00] = value
+	}
+}
+
 func main() {
 	ppu := NewPPU()
 	fmt.Println("Initialized PPU: ", ppu)
