@@ -1,5 +1,7 @@
 package hardware
 
+import "fmt"
+
 type PPU struct {
 	VRAM    []uint8
 	SPR_RAM []uint8
@@ -14,4 +16,33 @@ type PPU struct {
 	VRAR  uint8 //2006h - VRAM Address Register
 	VRDR  uint8 //2007h - VRAM Read/Write Data Register (RW)
 	SPDMA uint8 //4014h - SPR-RAM DMA Register
+
+	cycle, scanline uint16
+}
+
+func NewPPU() *PPU {
+	ppu := &PPU{}
+	ppu.VRAM = make([]uint8, 0x4000)
+	ppu.SPR_RAM = make([]uint8, 0x100)
+	return ppu
+}
+
+func (p *PPU) Step(cycles uint16) {
+	for i := uint16(0); i < cycles; i++ {
+		p.cycle++
+		if p.cycle == 341 {
+			p.cycle = 0
+			p.scanline++
+			if p.scanline == 262 {
+				p.scanline = 0
+				p.PSR |= 0b10000000 //Set VBlank flag
+			}
+
+		}
+	}
+}
+
+func main() {
+	ppu := NewPPU()
+	fmt.Println("Initialized PPU: ", ppu)
 }
