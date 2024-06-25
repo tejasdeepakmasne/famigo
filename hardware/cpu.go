@@ -1,5 +1,7 @@
 package hardware
 
+import "fmt"
+
 type OpcodeInfo struct {
 	mode   AddressingMode
 	name   string
@@ -22,7 +24,7 @@ type CPU struct {
 	X    uint8
 	Y    uint8
 	P    uint8
-	WRAM []uint8
+	WRAM [0x10000]uint8
 	Bus
 	Table [256]func(*OpcodeInfo)
 	Cycle uint64
@@ -70,6 +72,18 @@ func (c *CPU) Write16(address uint16, value uint16) {
 	lo := value & 0b0000000011111111
 	c.Write(address, uint8(lo))
 	c.Write(address+1, uint8(hi))
+}
+
+func ( c *CPU) setFLag(flag uint8, condition bool) {
+	if condition {
+		c.P |= flag
+	} else {
+		c.P &^= flag
+	}
+}
+
+func (c *CPU) getFlag(flag uint8) bool {
+	return c.P&flag != 0
 }
 
 func pagesDiffer(a, b uint16) bool {
@@ -162,6 +176,73 @@ var opcodeAddrMode [256]AddressingMode = [256]AddressingMode{
 	mREL, mIDY, mIMP, mIDY, mZPX, mZPX, mZPX, mZPX, mIMP, mABY, mIMP, mABY, mABX,
 }
 
-func (c *CPU) clock() {
+func (c * CPU) executeOpcode() {
+	opcode := c.Read(c.PC)
+	c.PC++
+	switch opcode {
+		case
 
+}
+
+func (c *CPU) clock() {
+	intialCycles := c.Cycle
+	c.executeOpcode()
+	return c.Cycle - intialCycles
+}
+
+func (c *CPU) reset() {
+	c.PC = c.Read16(RESET_ADDR)
+	c.SP = STACK_TOP
+	c.P |= U
+	c.Cycle = 7
+}
+
+func (c *CPU) interrupt() {
+	if !c.getFlag(I) {
+		c.push16(c.PC)
+		c.pushStatus()
+		c.setFLag(I, true)
+		c.PC = c.Read16(IRQ_ADDR)
+		c.Cycle = 7
+	}
+}
+
+func (c *CPU) pushStatus() {
+	c.push(c.P | B | U)
+}
+
+func (c *CPU) push(value uint8) {
+	c.Write(STACK_START | uint16(c.SP) , value)
+	c.SP--
+}
+
+func (c *CPU) push16(value uint16) {
+	c.push(uint8(value >> 8))
+	c.push(uint8(value & 0xFF))
+}
+
+func NewCPU() *CPU {
+	cpu := &CPU{
+		SP:  0xFD,
+		P: 0x24,
+	}
+	return cpu
+}
+
+func main() {
+	cpu := NewCPU()
+
+	cpu.WRAM[0x8000] = 0xA9 // LDA Immediate
+	cpu.WRAM[0x8001] = 0x42 // Value to load
+	cpu.WRAM[0x8002] = 0x85 // STA Zero Page
+	cpu.WRAM[0x8003] = 0x10 // Address to store
+	cpu.WRAM[0x8004] = 0x00 // BRK
+
+	cpu.PC = 0x8000
+
+	for !cpu.getFlag(B) {
+		cpu.clock()
+	}
+
+	fmt.Printf("Value at 0x10: %X\n", cpu.WRAM[0x10])
 }
