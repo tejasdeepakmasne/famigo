@@ -1,7 +1,5 @@
 package hardware
 
-import "fmt"
-
 type OpcodeInfo struct {
 	mode   AddressingMode
 	name   string
@@ -26,7 +24,7 @@ type CPU struct {
 	P    uint8
 	WRAM [0x10000]uint8
 	Bus
-	Table [256]func(*OpcodeInfo)
+	Table [256]func(*OpcodeInfo) uint64
 	Cycle uint64
 }
 
@@ -74,16 +72,20 @@ func (c *CPU) Write16(address uint16, value uint16) {
 	c.Write(address+1, uint8(hi))
 }
 
-func ( c *CPU) setFLag(flag uint8, condition bool) {
-	if condition {
-		c.P |= flag
+func (c *CPU) setFLag(flag Flag, value uint8) {
+	if value >= 1 {
+		c.P = c.P | uint8(flag)
 	} else {
-		c.P &^= flag
+		c.P = c.P & (^uint8(flag))
 	}
 }
 
-func (c *CPU) getFlag(flag uint8) bool {
-	return c.P&flag != 0
+func (c *CPU) getFlag(flag Flag) uint8 {
+	if c.P&uint8(flag) == uint8(flag) {
+		return 1
+	} else {
+		return 0
+	}
 }
 
 func pagesDiffer(a, b uint16) bool {
@@ -186,353 +188,126 @@ var opcodeAddrMode [256]AddressingMode = [256]AddressingMode{
 	mREL, mIDY, mIMP, mIDY, mZPX, mZPX, mZPX, mZPX, mIMP, mABY, mIMP, mABY, mABX, mABX, mABX, mABX, //Fx
 }
 
-func (c * CPU) executeOpcode() {
+var opcodeSize [256]uint16 = [256]uint16{
+	0, 2, 0, 2, 1, 1, 1, 1, 0, 1, 0, 1, 2, 2, 2, 2,
+	1, 2, 0, 2, 1, 1, 1, 1, 0, 2, 0, 2, 2, 2, 2, 2,
+	2, 2, 0, 2, 1, 1, 1, 1, 0, 1, 0, 1, 2, 2, 2, 2,
+	1, 2, 0, 2, 1, 1, 1, 1, 0, 2, 0, 2, 2, 2, 2, 2,
+	0, 2, 0, 2, 1, 1, 1, 1, 0, 1, 0, 1, 2, 2, 2, 2,
+	1, 2, 0, 2, 1, 1, 1, 1, 0, 2, 0, 2, 2, 2, 2, 2,
+	0, 2, 0, 2, 1, 1, 1, 1, 0, 1, 0, 1, 2, 2, 2, 2,
+	1, 2, 0, 2, 1, 1, 1, 1, 0, 2, 0, 2, 2, 2, 2, 2,
+	1, 2, 0, 2, 1, 1, 1, 1, 0, 1, 0, 1, 2, 2, 2, 2,
+	1, 2, 0, 2, 1, 1, 1, 1, 0, 2, 0, 2, 2, 2, 2, 2,
+	1, 2, 1, 2, 1, 1, 1, 1, 0, 1, 0, 1, 2, 2, 2, 2,
+	1, 2, 0, 2, 1, 1, 1, 1, 0, 2, 0, 2, 2, 2, 2, 2,
+	1, 2, 0, 2, 1, 1, 1, 1, 0, 1, 0, 1, 2, 2, 2, 2,
+	1, 2, 0, 2, 1, 1, 1, 1, 0, 2, 0, 2, 2, 2, 2, 2,
+	1, 2, 0, 2, 1, 1, 1, 1, 0, 1, 0, 1, 2, 2, 2, 2,
+	1, 2, 0, 2, 1, 1, 1, 1, 0, 2, 0, 2, 2, 2, 2, 2,
+}
+
+// instructionCycles indicates the number of cycles used by each instruction,
+// not including conditional cycles
+var opcodeCycles = [256]int{
+	7, 6, 2, 8, 3, 3, 5, 5, 3, 2, 2, 2, 4, 4, 6, 6,
+	2, 5, 2, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,
+	6, 6, 2, 8, 3, 3, 5, 5, 4, 2, 2, 2, 4, 4, 6, 6,
+	2, 5, 2, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,
+	6, 6, 2, 8, 3, 3, 5, 5, 3, 2, 2, 2, 3, 4, 6, 6,
+	2, 5, 2, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,
+	6, 6, 2, 8, 3, 3, 5, 5, 4, 2, 2, 2, 5, 4, 6, 6,
+	2, 5, 2, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,
+	2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4,
+	2, 6, 2, 6, 4, 4, 4, 4, 2, 5, 2, 5, 5, 5, 5, 5,
+	2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4,
+	2, 5, 2, 5, 4, 4, 4, 4, 2, 4, 2, 4, 4, 4, 4, 4,
+	2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6,
+	2, 5, 2, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,
+	2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6,
+	2, 5, 2, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,
+}
+
+func (c *CPU) createTable() {
+	c.Table = [256]func(*OpcodeInfo) uint64{
+		c.brk, c.ora, c.kil, c.slo, c.nop, c.ora, c.asl, c.slo,
+		c.php, c.ora, c.asl, c.anc, c.nop, c.ora, c.asl, c.slo,
+		c.bpl, c.ora, c.kil, c.slo, c.nop, c.ora, c.asl, c.slo,
+		c.clc, c.ora, c.nop, c.slo, c.nop, c.ora, c.asl, c.slo,
+		c.jsr, c.and, c.kil, c.rla, c.bit, c.and, c.rol, c.rla,
+		c.plp, c.and, c.rol, c.anc, c.bit, c.and, c.rol, c.rla,
+		c.bmi, c.and, c.kil, c.rla, c.nop, c.and, c.rol, c.rla,
+		c.sec, c.and, c.nop, c.rla, c.nop, c.and, c.rol, c.rla,
+		c.rti, c.eor, c.kil, c.sre, c.nop, c.eor, c.lsr, c.sre,
+		c.pha, c.eor, c.lsr, c.alr, c.jmp, c.eor, c.lsr, c.sre,
+		c.bvc, c.eor, c.kil, c.sre, c.nop, c.eor, c.lsr, c.sre,
+		c.cli, c.eor, c.nop, c.sre, c.nop, c.eor, c.lsr, c.sre,
+		c.rts, c.adc, c.kil, c.rra, c.nop, c.adc, c.ror, c.rra,
+		c.pla, c.adc, c.ror, c.arr, c.jmp, c.adc, c.ror, c.rra,
+		c.bvs, c.adc, c.kil, c.rra, c.nop, c.adc, c.ror, c.rra,
+		c.sei, c.adc, c.nop, c.rra, c.nop, c.adc, c.ror, c.rra,
+		c.nop, c.sta, c.nop, c.sax, c.sty, c.sta, c.stx, c.sax,
+		c.dey, c.nop, c.txa, c.xaa, c.sty, c.sta, c.stx, c.sax,
+		c.bcc, c.sta, c.kil, c.ahx, c.sty, c.sta, c.stx, c.sax,
+		c.tya, c.sta, c.txs, c.tas, c.shy, c.sta, c.shx, c.ahx,
+		c.ldy, c.lda, c.ldx, c.lax, c.ldy, c.lda, c.ldx, c.lax,
+		c.tay, c.lda, c.tax, c.lax, c.ldy, c.lda, c.ldx, c.lax,
+		c.bcs, c.lda, c.kil, c.lax, c.ldy, c.lda, c.ldx, c.lax,
+		c.clv, c.lda, c.tsx, c.las, c.ldy, c.lda, c.ldx, c.lax,
+		c.cpy, c.cmp, c.nop, c.dcp, c.cpy, c.cmp, c.dec, c.dcp,
+		c.iny, c.cmp, c.dex, c.axs, c.cpy, c.cmp, c.dec, c.dcp,
+		c.bne, c.cmp, c.kil, c.dcp, c.nop, c.cmp, c.dec, c.dcp,
+		c.cld, c.cmp, c.nop, c.dcp, c.nop, c.cmp, c.dec, c.dcp,
+		c.cpx, c.sbc, c.nop, c.isc, c.cpx, c.sbc, c.inc, c.isc,
+		c.inx, c.sbc, c.nop, c.sbc, c.cpx, c.sbc, c.inc, c.isc,
+		c.beq, c.sbc, c.kil, c.isc, c.nop, c.sbc, c.inc, c.isc,
+		c.sed, c.sbc, c.nop, c.isc, c.nop, c.sbc, c.inc, c.isc,
+	}
+}
+
+func (c *CPU) executeOpcode(initCycles uint64) uint64 {
 	opcode := c.Read(c.PC)
 	c.PC++
 	info := &OpcodeInfo{
-		mode: opcodeAddrMode[opcode],
-		name: opcodeNameMatrix[opcode],
-		cycles: 0,
+		mode:   opcodeAddrMode[opcode],
+		name:   opcodeNameMatrix[opcode],
+		cycles: opcodeCycles[opcode],
 	}
-	address, operand, pageCrossed := c.getModeInfo(info.mode)
-	switch opcode {
-	case 0x00:
-		c.BRK(info, pageCrossed)
-	case 0x01:
-		c.ORA(info, operand, pageCrossed)
-	case 0x05:
-		c.ORA(info, operand, pageCrossed)
-	case 0x06:
-		c.ASL(info, address, pageCrossed)
-	case 0x08:
-		c.PHP(info, pageCrossed)
-	case 0x09:
-		c.ORA(info, operand, pageCrossed)
-	case 0x0A:
-		c.ASL(info, address, pageCrossed)
-	case 0x0D:
-		c.ORA(info, operand, pageCrossed)
-	case 0x0E:
-		c.ASL(info, address, pageCrossed)
-	case 0x10:
-		c.BPL(info, pageCrossed)
-	case 0x11:
-		c.ORA(info, operand, pageCrossed)
-	case 0x15:
-		c.ORA(info, operand, pageCrossed)
-	case 0x16:
-		c.ASL(info, address, pageCrossed)
-	case 0x18:
-		c.CLC(info, pageCrossed)
-	case 0x19:
-		c.ORA(info, operand, pageCrossed)
-	case 0x1D:
-		c.ORA(info, operand, pageCrossed)
-	case 0x1E:
-		c.ASL(info, address, pageCrossed)
-	case 0x20:
-		c.JSR(info, pageCrossed)
-	case 0x21:
-		c.AND(info, operand, pageCrossed)
-	case 0x24:
-		c.BIT(info, operand, pageCrossed)
-	case 0x25:
-		c.AND(info, operand, pageCrossed)
-	case 0x26:
-		c.ROL(info, address, pageCrossed)
-	case 0x28:
-		c.PLP(info, pageCrossed)
-	case 0x29:
-		c.AND(info, operand, pageCrossed)
-	case 0x2A:
-		c.ROL(info, address, pageCrossed)
-	case 0x2C:
-		c.BIT(info, operand, pageCrossed)
-	case 0x2D:
-		c.AND(info, operand, pageCrossed)
-	case 0x2E:
-		c.ROL(info, address, pageCrossed)
-	case 0x30:
-		c.BMI(info, pageCrossed)
-	case 0x31:
-		c.AND(info, operand, pageCrossed)
-	case 0x35:
-		c.AND(info, operand, pageCrossed)
-	case 0x36:
-		c.ROL(info, address, pageCrossed)
-	case 0x38:
-		c.SEC(info, pageCrossed)
-	case 0x39:
-		c.AND(info, operand, pageCrossed)
-	case 0x3D:
-		c.AND(info, operand, pageCrossed)
-	case 0x3E:
-		c.ROL(info, address, pageCrossed)
-	case 0x40:
-		c.RTI(info, pageCrossed)
-	case 0x41:
-		c.EOR(info, operand, pageCrossed)
-	case 0x45:
-		c.EOR(info, operand, pageCrossed)
-	case 0x46:
-		c.LSR(info, address, pageCrossed)
-	case 0x48:
-		c.PHA(info, pageCrossed)
-	case 0x49:
-		c.EOR(info, operand, pageCrossed)
-	case 0x4A:
-		c.LSR(info, address, pageCrossed)
-	case 0x4C:
-		c.JMP(info, pageCrossed)
-	case 0x4D:
-		c.EOR(info, operand, pageCrossed)
-	case 0x4E:
-		c.LSR(info, address, pageCrossed)
-	case 0x50:
-		c.BVC(info, pageCrossed)
-	case 0x51:
-		c.EOR(info, operand, pageCrossed)
-	case 0x55:
-		c.EOR(info, operand, pageCrossed)
-	case 0x56:
-		c.LSR(info, address, pageCrossed)
-	case 0x58:
-		c.CLI(info, pageCrossed)
-	case 0x59:
-		c.EOR(info, operand, pageCrossed)
-	case 0x5D:
-		c.EOR(info, operand, pageCrossed)
-	case 0x5E:
-		c.LSR(info, address, pageCrossed)
-	case 0x60:
-		c.RTS(info, pageCrossed)
-	case 0x61:
-		c.ADC(info, operand, pageCrossed)
-	case 0x65:
-		c.ADC(info, operand, pageCrossed)
-	case 0x66:
-		c.ROR(info, address, pageCrossed)
-	case 0x68:
-		c.PLA(info, pageCrossed)
-	case 0x69:
-		c.ADC(info, operand, pageCrossed)
-	case 0x6A:
-		c.ROR(info, address, pageCrossed)
-	case 0x6C:
-		c.JMP(info, pageCrossed)
-	case 0x6D:
-		c.ADC(info, operand, pageCrossed)
-	case 0x6E:
-		c.ROR(info, address, pageCrossed)
-	case 0x70:
-		c.BVS(info, pageCrossed)
-	case 0x71:
-		c.ADC(info, operand, pageCrossed)
-	case 0x75:
-		c.ADC(info, operand, pageCrossed)
-	case 0x76:
-		c.ROR(info, address, pageCrossed)
-	case 0x78:
-		c.SEI(info, pageCrossed)
-	case 0x79:
-		c.ADC(info, operand, pageCrossed)
-	case 0x7D:
-		c.ADC(info, operand, pageCrossed)
-	case 0x7E:
-		c.ROR(info, address, pageCrossed)
-	case 0x81:
-		c.STA(info, address, pageCrossed)
-	case 0x84:
-		c.STY(info, address, pageCrossed)
-	case 0x85:
-		c.STA(info, address, pageCrossed)
-	case 0x86:
-		c.STX(info, address, pageCrossed)
-	case 0x88:
-		c.DEY(info, pageCrossed)
-	case 0x8A:
-		c.TXA(info, pageCrossed)
-	case 0x8C:
-		c.STY(info, address, pageCrossed)
-	case 0x8D:
-		c.STA(info, address, pageCrossed)
-	case 0x8E:
-		c.STX(info, address, pageCrossed)
-	case 0x90:
-		c.BCC(info, pageCrossed)
-	case 0x91:
-		c.STA(info, address, pageCrossed)
-	case 0x94:
-		c.STY(info, address, pageCrossed)
-	case 0x95:
-		c.STA(info, address, pageCrossed)
-	case 0x96:
-		c.STX(info, address, pageCrossed)
-	case 0x98:
-		c.TYA(info, pageCrossed)
-	case 0x99:
-		c.STA(info, address, pageCrossed)
-	case 0x9A:
-		c.TXS(info, pageCrossed)
-	case 0x9D:
-		c.STA(info, address, pageCrossed)
-	case 0xA0:
-		c.LDY(info, operand, pageCrossed)
-	case 0xA1:
-		c.LDA(info, operand, pageCrossed)
-	case 0xA2:
-		c.LDX(info, operand, pageCrossed)
-	case 0xA4:
-		c.LDY(info, operand, pageCrossed)
-	case 0xA5:
-		c.LDA(info, operand, pageCrossed)
-	case 0xA6:
-		c.LDX(info, operand, pageCrossed)
-	case 0xA8:
-		c.TAY(info, pageCrossed)
-	case 0xA9:
-		c.LDA(info, operand, pageCrossed)
-	case 0xAA:
-		c.TAX(info, pageCrossed)
-	case 0xAC:
-		c.LDY(info, operand, pageCrossed)
-	case 0xAD:
-		c.LDA(info, operand, pageCrossed)
-	case 0xAE:
-		c.LDX(info, operand, pageCrossed)
-	case 0xB0:
-		c.BCS(info, pageCrossed)
-	case 0xB1:
-		c.LDA(info, operand, pageCrossed)
-	case 0xB4:
-		c.LDY(info, operand, pageCrossed)
-	case 0xB5:
-		c.LDA(info, operand, pageCrossed)
-	case 0xB6:
-		c.LDX(info, operand, pageCrossed)
-	case 0xB8:
-		c.CLV(info, pageCrossed)
-	case 0xB9:
-		c.LDA(info, operand, pageCrossed)
-	case 0xBA:
-		c.TSX(info, pageCrossed)
-	case 0xBC:
-		c.LDY(info, operand, pageCrossed)
-	case 0xBD:
-		c.LDA(info, operand, pageCrossed)
-	case 0xBE:
-		c.LDX(info, operand, pageCrossed)
-	case 0xC0:
-		c.CPY(info, operand, pageCrossed)
-	case 0xC1:
-		c.CMP(info, operand, pageCrossed)
-	case 0xC4:
-		c.CPY(info, operand, pageCrossed)
-	case 0xC5:
-		c.CMP(info, operand, pageCrossed)
-	case 0xC6:
-		c.DEC(info, address, pageCrossed)
-	case 0xC8:
-		c.INY(info, pageCrossed)
-	case 0xC9:
-		c.CMP(info, operand, pageCrossed)
-	case 0xCA:
-		c.DEX(info, pageCrossed)
-	case 0xCC:
-		c.CPY(info, operand, pageCrossed)
-	case 0xCD:
-		c.CMP(info, operand, pageCrossed)
-	case 0xCE:
-		c.DEC(info, address, pageCrossed)
-	case 0xD0:
-		c.BNE(info, pageCrossed)
-	case 0xD1:
-		c.CMP(info, operand, pageCrossed)
-	case 0xD5:
-		c.CMP(info, operand, pageCrossed)
-	case 0xD6:
-		c.DEC(info, address, pageCrossed)
-	case 0xD8:
-		c.CLD(info, pageCrossed)
-	case 0xD9:
-		c.CMP(info, operand, pageCrossed)
-	case 0xDD:
-		c.CMP(info, operand, pageCrossed)
-	case 0xDE:
-		c.DEC(info, address, pageCrossed)
-	case 0xE0:
-		c.CPX(info, operand, pageCrossed)
-	case 0xE1:
-		c.SBC(info, operand, pageCrossed)
-	case 0xE4:
-		c.CPX(info, operand, pageCrossed)
-	case 0xE5:
-		c.SBC(info, operand, pageCrossed)
-	case 0xE6:
-		c.INC(info, address, pageCrossed)
-	case 0xE8:
-		c.INX(info, pageCrossed)
-	case 0xE9:
-		c.SBC(info, operand, pageCrossed)
-	case 0xEA:
-		c.NOP(info, pageCrossed)
-	case 0xEC:
-		c.CPX(info, operand, pageCrossed)
-	case 0xED:
-		c.SBC(info, operand, pageCrossed)
-	case 0xEE:
-		c.INC(info, address, pageCrossed)
-	case 0xF0:
-		c.BEQ(info, pageCrossed)
-	case 0xF1:
-		c.SBC(info, operand, pageCrossed)
-	case 0xF5:
-		c.SBC(info, operand, pageCrossed)
-	case 0xF6:
-		c.INC(info, address, pageCrossed)
-	case 0xF8:
-		c.SED(info, pageCrossed)
-	case 0xF9:
-		c.SBC(info, operand, pageCrossed)
-	case 0xFD:
-		c.SBC(info, operand, pageCrossed)
-	case 0xFE:
-		c.INC(info, address, pageCrossed)
-	default:
-		fmt.Printf("Unknown opcode: %X\n", opcode)
-	}
+	additionalCycles := c.Table[opcode](info)
+	c.PC += opcodeSize[opcode]
+	return additionalCycles
 
 }
 
-func (c *CPU) clock() {
-	intialCycles := c.Cycle
-	c.executeOpcode()
-	return c.Cycle - intialCycles
+func (c *CPU) clock() uint64 {
+	Cycles := c.Cycle
+	Cycles += c.executeOpcode(Cycles)
+	return Cycles - c.Cycle
 }
 
 func (c *CPU) reset() {
 	c.PC = c.Read16(RESET_ADDR)
 	c.SP = STACK_TOP
-	c.P |= U
+	c.P |= uint8(U)
 	c.Cycle = 7
 }
 
 func (c *CPU) interrupt() {
-	if !c.getFlag(I) {
+	if c.getFlag(I) == 0 {
 		c.push16(c.PC)
 		c.pushStatus()
-		c.setFLag(I, true)
+		c.setFLag(I, 1)
 		c.PC = c.Read16(IRQ_ADDR)
 		c.Cycle = 7
 	}
 }
 
 func (c *CPU) pushStatus() {
-	c.push(c.P | B | U)
+	c.push(c.P | uint8(B) | uint8(U))
 }
 
 func (c *CPU) push(value uint8) {
-	c.Write(STACK_START | uint16(c.SP) , value)
+	c.Write(STACK_START|uint16(c.SP), value)
 	c.SP--
 }
 
@@ -543,10 +318,71 @@ func (c *CPU) push16(value uint16) {
 
 func NewCPU() *CPU {
 	cpu := &CPU{
-		SP:  0xFD,
-		P: 0x24,
+		SP: 0xFD,
+		P:  0x24,
 	}
 	return cpu
+}
+
+func doesCarry(val uint16) bool {
+	if val > 255 {
+		return true
+	}
+	return false
+}
+
+func updateZandN(val uint8) {
+	if val == 0 {
+		c.setFLag(Z, 1)
+	} else {
+		c.setFLag(Z, 0)
+	}
+
+	if val > 127 {
+		c.setFLag(N, 1)
+	} else {
+		c.setFLag(N, 0)
+	}
+}
+
+func doesOverflow(v1 uint8, v2 uint8, val uint16) bool {
+	if v1 < 128 && v2 < 128 {
+		if val > 127 {
+			return true
+		}
+	}
+	if v1 > 127 && v2 > 127 {
+		if val-256 < 128 {
+			return true
+		}
+	}
+	return false
+}
+
+// opcodes
+func (c *CPU) adc(info *OpcodeInfo) uint64 {
+	_, operand, pageCrossed := c.getModeInfo(info.mode)
+	var temp uint16 = uint16(operand) + uint16(c.A) + uint16(c.getFlag(C))
+
+	if doesCarry(temp) {
+		c.setFLag(C, 1)
+	} else {
+		c.setFLag(C, 0)
+	}
+
+	if doesOverflow(c.A, operand+uint8(c.getFlag(C)), temp) {
+		c.setFLag(V, 1)
+	} else {
+		c.setFLag(V, 0)
+	}
+
+	c.A = uint8(temp % 256)
+	updateZandN(c.A)
+	var additionalCycles uint64 = 0
+	if pageCrossed {
+		additionalCycles++
+	}
+	return additionalCycles
 }
 
 // func main() {
