@@ -1,5 +1,7 @@
 package hardware
 
+// TODO: implement ADC, SBC
+
 type OpcodeInfo struct {
 	mode   AddressingMode
 	name   string
@@ -321,6 +323,20 @@ func (c *CPU) push(value uint8) {
 	c.SP--
 }
 
+func (c *CPU) pull() uint8 {
+	val := c.Read(STACK_START | uint16(c.SP))
+	c.SP++
+	return val
+}
+
+func (c *CPU) pull16() uint16 {
+	topAddr := STACK_START | uint16(c.SP)
+	lo := uint16(c.Read(topAddr))
+	hi := uint16(c.Read(topAddr + 1))
+	c.SP += 2
+	return (hi << 8) | lo
+}
+
 func (c *CPU) push16(value uint16) {
 	c.push(uint8(value >> 8))
 	c.push(uint8(value & 0xFF))
@@ -497,6 +513,335 @@ func (c *CPU) bpl(info *OpcodeInfo) uint64 {
 		}
 	}
 	return additionalCycles
+}
+
+// copy of c.IRQ() duplicated to prevent double counting of cycles
+func (c *CPU) brk(info *OpcodeInfo) uint64 {
+	if c.getFlag(I) == 0 {
+		c.push16(c.PC)
+		c.pushStatus()
+		c.setFLag(I, 1)
+		c.PC = c.Read16(IRQ_ADDR)
+	}
+
+	return 0
+}
+
+func (c *CPU) bvc(info *OpcodeInfo) uint64 {
+	address, _, pageCrossed := c.getModeInfo(info.mode)
+	var additionalCycles uint64
+	if c.getFlag(V) == 0 {
+		c.PC = address
+		additionalCycles++
+		if pageCrossed {
+			additionalCycles++
+		}
+
+	}
+	return additionalCycles
+}
+
+func (c *CPU) bvs(info *OpcodeInfo) uint64 {
+	address, _, pageCrossed := c.getModeInfo(info.mode)
+	var additionalCycles uint64
+	if c.getFlag(V) == 1 {
+		c.PC = address
+		additionalCycles++
+		if pageCrossed {
+			additionalCycles++
+		}
+
+	}
+	return additionalCycles
+}
+
+func (c *CPU) clc(info *OpcodeInfo) uint64 {
+	c.setFLag(C, 0)
+	return 0
+}
+
+func (c *CPU) cld(info *OpcodeInfo) uint64 {
+	c.setFLag(D, 0)
+	return 0
+}
+
+func (c *CPU) cli(info *OpcodeInfo) uint64 {
+	c.setFLag(I, 0)
+	return 0
+}
+
+func (c *CPU) clv(info *OpcodeInfo) uint64 {
+	c.setFLag(V, 0)
+	return 0
+}
+
+func (c *CPU) cmp(info *OpcodeInfo) uint64 {
+	_, operand, pageCrossed := c.getModeInfo(info.mode)
+	temp := c.A - operand
+	if temp >= 0 {
+		c.setFLag(C, 1)
+	} else {
+		c.setFLag(C, 0)
+	}
+
+	c.updateZandN(temp)
+	var additionalCycles uint64
+	if pageCrossed {
+		additionalCycles++
+	}
+	return additionalCycles
+}
+
+func (c *CPU) cpx(info *OpcodeInfo) uint64 {
+	_, operand, pageCrossed := c.getModeInfo(info.mode)
+	temp := c.X - operand
+	if temp >= 0 {
+		c.setFLag(C, 1)
+	} else {
+		c.setFLag(C, 0)
+	}
+
+	c.updateZandN(temp)
+	var additionalCycles uint64
+	if pageCrossed {
+		additionalCycles++
+	}
+	return additionalCycles
+}
+
+func (c *CPU) cpy(info *OpcodeInfo) uint64 {
+	_, operand, pageCrossed := c.getModeInfo(info.mode)
+	temp := c.Y - operand
+	if temp >= 0 {
+		c.setFLag(C, 1)
+	} else {
+		c.setFLag(C, 0)
+	}
+
+	c.updateZandN(temp)
+	var additionalCycles uint64
+	if pageCrossed {
+		additionalCycles++
+	}
+	return additionalCycles
+}
+
+func (c *CPU) dec(info *OpcodeInfo) uint64 {
+	address, operand, _ := c.getModeInfo(info.mode)
+	operand--
+	c.Write(address, operand)
+	c.updateZandN(operand)
+	return 0
+}
+
+func (c *CPU) dex(info *OpcodeInfo) uint64 {
+	c.X--
+	c.updateZandN(c.X)
+	return 0
+}
+
+func (c *CPU) dey(info *OpcodeInfo) uint64 {
+	c.Y--
+	c.updateZandN(c.Y)
+	return 0
+}
+
+func (c *CPU) eor(info *OpcodeInfo) uint64 {
+	_, operand, pageCrossed := c.getModeInfo(info.mode)
+	c.A = c.A ^ operand
+	c.updateZandN(c.A)
+	var additionalCycles uint64
+	if pageCrossed {
+		additionalCycles++
+	}
+	return additionalCycles
+}
+
+func (c *CPU) inc(info *OpcodeInfo) uint64 {
+	address, operand, _ := c.getModeInfo(info.mode)
+	operand++
+	c.Write(address, operand)
+	c.updateZandN(operand)
+	return 0
+}
+
+func (c *CPU) inx(info *OpcodeInfo) uint64 {
+	c.X++
+	c.updateZandN(c.X)
+	return 0
+}
+
+func (c *CPU) iny(info *OpcodeInfo) uint64 {
+	c.Y++
+	c.updateZandN(c.Y)
+	return 0
+}
+
+func (c *CPU) jmp(info *OpcodeInfo) uint64 {
+	address, _, _ := c.getModeInfo(info.mode)
+	c.PC = address
+	return 0
+}
+
+func (c *CPU) jsr(info *OpcodeInfo) uint64 {
+	address, _, _ := c.getModeInfo(info.mode)
+	c.push16(c.PC + 1)
+	c.PC = address
+	return 0
+}
+
+func (c *CPU) lda(info *OpcodeInfo) uint64 {
+	_, operand, pageCrossed := c.getModeInfo(info.mode)
+	c.A = operand
+	c.updateZandN(c.A)
+	var additionalCycles uint64
+	if pageCrossed {
+		additionalCycles++
+	}
+	return additionalCycles
+}
+
+func (c *CPU) ldx(info *OpcodeInfo) uint64 {
+	_, operand, pageCrossed := c.getModeInfo(info.mode)
+	c.X = operand
+	c.updateZandN(c.X)
+	var additionalCycles uint64
+	if pageCrossed {
+		additionalCycles++
+	}
+	return additionalCycles
+}
+
+func (c *CPU) ldy(info *OpcodeInfo) uint64 {
+	_, operand, pageCrossed := c.getModeInfo(info.mode)
+	c.Y = operand
+	c.updateZandN(c.Y)
+	var additionalCycles uint64
+	if pageCrossed {
+		additionalCycles++
+	}
+	return additionalCycles
+}
+
+func (c *CPU) lsr(info *OpcodeInfo) uint64 {
+	address, operand, _ := c.getModeInfo(info.mode)
+	c.setFLag(C, (operand & 1))
+	operand = operand >> 1
+	if info.mode == mACC {
+		c.A = operand
+	} else {
+		c.Write(address, operand)
+	}
+	c.updateZandN(operand)
+	return 0
+}
+
+func (c *CPU) nop(info *OpcodeInfo) uint64 {
+	_, _, pageCrossed := c.getModeInfo(info.mode)
+	var additionalCycles uint64
+	if pageCrossed {
+		additionalCycles++
+	}
+	return additionalCycles
+}
+
+func (c *CPU) ora(info *OpcodeInfo) uint64 {
+	_, operand, pageCrossed := c.getModeInfo(info.mode)
+	c.A = c.A | operand
+	c.updateZandN(c.A)
+	var additionalCycles uint64
+	if pageCrossed {
+		additionalCycles++
+	}
+	return additionalCycles
+}
+
+func (c *CPU) pha(info *OpcodeInfo) uint64 {
+	c.push(c.A)
+	return 0
+}
+
+func (c *CPU) php(info *OpcodeInfo) uint64 {
+	c.pushStatus()
+	return 0
+}
+
+func (c *CPU) pla(info *OpcodeInfo) uint64 {
+	c.A = c.pull()
+	c.updateZandN(c.A)
+	return 0
+}
+
+func (c *CPU) plp(info *OpcodeInfo) uint64 {
+	c.P = c.pull()
+	return 0
+}
+
+func (c *CPU) rol(info *OpcodeInfo) uint64 {
+	address, operand, _ := c.getModeInfo(info.mode)
+	carry := c.getFlag(C)
+	c.setFLag(C, (operand&(1<<7))>>7)
+	operand = operand << 1
+	operand = operand + carry
+	c.updateZandN(operand)
+	if info.mode == mACC {
+		c.A = operand
+	} else {
+		c.Write(address, operand)
+	}
+	return 0
+}
+
+func (c *CPU) ror(info *OpcodeInfo) uint64 {
+	address, operand, _ := c.getModeInfo(info.mode)
+	carry := c.getFlag(C)
+	c.setFLag(C, operand&1)
+	operand = (operand >> 1) + (carry << 7)
+	c.updateZandN(operand)
+	if info.mode == mACC {
+		c.A = operand
+	} else {
+		c.Write(address, operand)
+	}
+	return 0
+}
+
+func (c *CPU) rti(info *OpcodeInfo) uint64 {
+	c.P = c.pull()
+	c.PC = c.pull16() + 1
+	return 0
+}
+
+func (c *CPU) rts(info *OpcodeInfo) uint64 {
+	c.PC = c.pull16() + 1
+	return 0
+}
+
+func (c *CPU) sec(info *OpcodeInfo) uint64 {
+	c.setFLag(C, 1)
+	return 0
+}
+
+func (c *CPU) sed(info *OpcodeInfo) uint64 {
+	c.setFLag(D, 1)
+	return 0
+}
+
+func (c *CPU) sei(info *OpcodeInfo) uint64 {
+	c.setFLag(I, 1)
+	return 0
+}
+
+func (c *CPU) sta(info *OpcodeInfo) uint64 {
+	address, _, _ := c.getModeInfo(info.mode)
+	c.Write(address, c.A)
+	return 0
+}
+
+func (c *CPU) stx(info *OpcodeInfo) uint64 {
+	address, _, _ := c.getModeInfo(info.mode)
+	c.Write(address, c.X)
+	return 0
 }
 
 // func main() {
