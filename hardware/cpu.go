@@ -461,6 +461,19 @@ func (c *CPU) bcs(info *OpcodeInfo) uint64 {
 	return additionalCycles
 }
 
+func (c *CPU) beq(info *OpcodeInfo) uint64 {
+	address, _, pagesCrossed := c.getModeInfo(info.mode)
+	var additionalCycles uint64
+	if c.getFlag(Z) == 1 {
+		c.PC = address
+		additionalCycles++
+		if pagesCrossed {
+			additionalCycles++
+		}
+	}
+	return additionalCycles
+}
+
 func (c *CPU) bit(info *OpcodeInfo) uint64 {
 	_, operand, _ := c.getModeInfo(info.mode)
 	temp := c.A & operand
