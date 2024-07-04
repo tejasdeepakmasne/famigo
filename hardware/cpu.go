@@ -142,6 +142,7 @@ func (c *CPU) getModeInfo(mode AddressingMode) (uint16, uint8, bool) {
 			address = c.PC + uint16(c.Read(c.PC)) - 1
 			operand = c.Read(c.PC)
 		}
+		pageCrossed = pagesDiffer(c.PC, address)
 	case mIMM:
 		operand = c.Read(c.PC)
 	}
@@ -188,6 +189,7 @@ var opcodeAddrMode [256]AddressingMode = [256]AddressingMode{
 	mREL, mIDY, mIMP, mIDY, mZPX, mZPX, mZPX, mZPX, mIMP, mABY, mIMP, mABY, mABX, mABX, mABX, mABX, //Fx
 }
 
+// size of opcodes-1
 var opcodeSize [256]uint16 = [256]uint16{
 	0, 2, 0, 2, 1, 1, 1, 1, 0, 1, 0, 1, 2, 2, 2, 2,
 	1, 2, 0, 2, 1, 1, 1, 1, 0, 2, 0, 2, 2, 2, 2, 2,
@@ -292,14 +294,22 @@ func (c *CPU) reset() {
 	c.Cycle = 7
 }
 
-func (c *CPU) interrupt() {
+func (c *CPU) IRQ() {
 	if c.getFlag(I) == 0 {
 		c.push16(c.PC)
 		c.pushStatus()
 		c.setFLag(I, 1)
 		c.PC = c.Read16(IRQ_ADDR)
-		c.Cycle = 7
+		c.Cycle += 7
 	}
+}
+
+func (c *CPU) NMI() {
+	c.push16(c.PC)
+	c.pushStatus()
+	c.setFLag(I, 1)
+	c.PC = c.Read16(NMI_ADDR)
+	c.Cycle += 7
 }
 
 func (c *CPU) pushStatus() {
@@ -331,7 +341,7 @@ func doesCarry(val uint16) bool {
 	return false
 }
 
-func updateZandN(val uint8) {
+func (c *CPU) updateZandN(val uint8) {
 	if val == 0 {
 		c.setFLag(Z, 1)
 	} else {
@@ -377,10 +387,114 @@ func (c *CPU) adc(info *OpcodeInfo) uint64 {
 	}
 
 	c.A = uint8(temp % 256)
-	updateZandN(c.A)
+	c.updateZandN(c.A)
 	var additionalCycles uint64 = 0
 	if pageCrossed {
 		additionalCycles++
+	}
+	return additionalCycles
+}
+
+func (c *CPU) and(info *OpcodeInfo) uint64 {
+	_, operand, pageCrossed := c.getModeInfo(info.mode)
+	c.A = c.A & operand
+	c.updateZandN(c.A)
+	var additionalCycles uint64 = 0
+	if pageCrossed {
+		additionalCycles++
+	}
+	return additionalCycles
+}
+
+func (c *CPU) asl(info *OpcodeInfo) uint64 {
+	address, operand, _ := c.getModeInfo(info.mode)
+	c.setFLag(C, operand>>7)
+	operand = operand << 1
+	if info.mode == mACC {
+		c.A = operand
+	} else {
+		c.Write(address, operand)
+	}
+	c.updateZandN(operand)
+	return 0
+}
+
+func (c *CPU) bcc(info *OpcodeInfo) uint64 {
+	address, _, pageCrossed := c.getModeInfo(info.mode)
+	var additionalCycles uint64
+	if c.getFlag(C) == 0 {
+		c.PC = address
+		additionalCycles++
+		if pageCrossed {
+			additionalCycles++
+		}
+	}
+	return additionalCycles
+}
+
+func (c *CPU) bcs(info *OpcodeInfo) uint64 {
+	address, _, pagesCrossed := c.getModeInfo(info.mode)
+	var additionalCycles uint64
+	if c.getFlag(C) == 1 {
+		c.PC = address
+		additionalCycles++
+		if pagesCrossed {
+			additionalCycles++
+		}
+	}
+	return additionalCycles
+}
+
+func (c *CPU) bit(info *OpcodeInfo) uint64 {
+	_, operand, _ := c.getModeInfo(info.mode)
+	temp := c.A & operand
+	m7 := (operand & (1 << 7)) >> 7
+	m6 := (operand & (1 << 6)) >> 6
+	c.setFLag(N, m7)
+	c.setFLag(V, m6)
+	if temp == 0 {
+		c.setFLag(C, 1)
+	} else {
+		c.setFLag(C, 0)
+	}
+	return 0
+}
+
+func (c *CPU) bmi(info *OpcodeInfo) uint64 {
+	address, _, pageCrossed := c.getModeInfo(info.mode)
+	var additionalCycles uint64
+	if c.getFlag(N) == 1 {
+		c.PC = address
+		additionalCycles++
+		if pageCrossed {
+			additionalCycles++
+		}
+	}
+	return additionalCycles
+}
+
+func (c *CPU) bne(info *OpcodeInfo) uint64 {
+	address, _, pageCrossed := c.getModeInfo(info.mode)
+	var additionalCycles uint64
+	if c.getFlag(C) == 0 {
+		c.PC = address
+		additionalCycles++
+		if pageCrossed {
+			additionalCycles++
+		}
+	}
+	return additionalCycles
+}
+
+func (c *CPU) bpl(info *OpcodeInfo) uint64 {
+	address, _, pageCrossed := c.getModeInfo(info.mode)
+	var additionalCycles uint64
+	if c.getFlag(N) == 0 {
+		c.PC = address
+		additionalCycles++
+		if pageCrossed {
+			additionalCycles++
+		}
 	}
 	return additionalCycles
 }
