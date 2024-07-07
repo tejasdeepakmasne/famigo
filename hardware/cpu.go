@@ -350,13 +350,6 @@ func NewCPU() *CPU {
 	return cpu
 }
 
-func doesCarry(val uint16) bool {
-	if val > 255 {
-		return true
-	}
-	return false
-}
-
 func (c *CPU) updateZandN(val uint8) {
 	if val == 0 {
 		c.setFLag(Z, 1)
@@ -371,39 +364,26 @@ func (c *CPU) updateZandN(val uint8) {
 	}
 }
 
-func doesOverflow(v1 uint8, v2 uint8, val uint16) bool {
-	if v1 < 128 && v2 < 128 {
-		if val > 127 {
-			return true
-		}
-	}
-	if v1 > 127 && v2 > 127 {
-		if val-256 < 128 {
-			return true
-		}
-	}
-	return false
-}
-
 // opcodes
 func (c *CPU) adc(info *OpcodeInfo) uint64 {
 	_, operand, pageCrossed := c.getModeInfo(info.mode)
-	var temp uint16 = uint16(operand) + uint16(c.A) + uint16(c.getFlag(C))
+	a := c.A
+	b := operand
+	carry := c.getFlag(C)
+	c.A = a + b + carry
+	c.updateZandN(c.A)
 
-	if doesCarry(temp) {
+	if uint(a)+uint(b)+uint(carry) > 0xFF {
 		c.setFLag(C, 1)
 	} else {
 		c.setFLag(C, 0)
 	}
-
-	if doesOverflow(c.A, operand+uint8(c.getFlag(C)), temp) {
+	if (a^b)&0x80 == 0 && (a^c.A)&0x80 != 0 {
 		c.setFLag(V, 1)
 	} else {
 		c.setFLag(V, 0)
 	}
 
-	c.A = uint8(temp % 256)
-	c.updateZandN(c.A)
 	var additionalCycles uint64 = 0
 	if pageCrossed {
 		additionalCycles++
@@ -830,6 +810,30 @@ func (c *CPU) rts(info *OpcodeInfo) uint64 {
 	return 0
 }
 
+func (c *CPU) sbc(info *OpcodeInfo) uint64 {
+	_, operand, pageCrossed := c.getModeInfo(info.mode)
+	a := c.A
+	b := operand
+	carry := c.getFlag(C)
+	c.A = a - b - (1 - carry)
+	c.updateZandN(c.A)
+	if int(a)-int(b)-int(1-carry) >= 0 {
+		c.setFLag(C, 1)
+	} else {
+		c.setFLag(C, 0)
+	}
+	if (a^b)&0x80 != 0 && (a^c.A)&0x80 != 0 {
+		c.setFLag(V, 1)
+	} else {
+		c.setFLag(V, 0)
+	}
+	var additionalCycles uint64
+	if pageCrossed {
+		additionalCycles++
+	}
+	return additionalCycles
+}
+
 func (c *CPU) sec(info *OpcodeInfo) uint64 {
 	c.setFLag(C, 1)
 	return 0
@@ -854,6 +858,124 @@ func (c *CPU) sta(info *OpcodeInfo) uint64 {
 func (c *CPU) stx(info *OpcodeInfo) uint64 {
 	address, _, _ := c.getModeInfo(info.mode)
 	c.Write(address, c.X)
+	return 0
+}
+
+func (c *CPU) sty(info *OpcodeInfo) uint64 {
+	address, _, _ := c.getModeInfo(info.mode)
+	c.Write(address, c.Y)
+	return 0
+}
+
+func (c *CPU) tax(info *OpcodeInfo) uint64 {
+	c.X = c.A
+	c.updateZandN(c.X)
+	return 0
+}
+
+func (c *CPU) tay(info *OpcodeInfo) uint64 {
+	c.Y = c.A
+	c.updateZandN(c.Y)
+	return 0
+}
+
+func (c *CPU) tsx(info *OpcodeInfo) uint64 {
+	c.X = c.SP
+	c.updateZandN(c.X)
+	return 0
+}
+
+func (c *CPU) txa(info *OpcodeInfo) uint64 {
+	c.A = c.X
+	c.updateZandN(c.A)
+	return 0
+}
+
+func (c *CPU) txs(info *OpcodeInfo) uint64 {
+	c.SP = c.X
+	return 0
+}
+
+func (c *CPU) tya(info *OpcodeInfo) uint64 {
+	c.A = c.Y
+	c.updateZandN(c.A)
+	return 0
+}
+
+// Illegal Opcodes
+func (c *CPU) kil(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) slo(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) rla(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) sre(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) rra(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) sax(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) ahx(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) lax(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) dcp(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) isc(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) anc(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) alr(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) arr(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) xaa(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) tas(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) las(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) axs(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) shy(info *OpcodeInfo) uint64 {
+	return 0
+}
+
+func (c *CPU) shx(info *OpcodeInfo) uint64 {
 	return 0
 }
 

@@ -10,10 +10,14 @@ type cpuBus struct {
 }
 
 func (c *cpuBus) Read(address uint16) uint8 {
-	return c.nes.cpu.WRAM[address]
+	if address < 0x2000 {
+		return c.nes.cpu.WRAM[address&0x07ff]
+	}
+	return c.nes.cpu.WRAM[address&0x07ff]
 }
 
 func (c *cpuBus) Write(address uint16, value uint8) {
-	c.nes.cpu.WRAM[address] = value
+	if address < 0x2000 {
+		c.nes.cpu.WRAM[address] = value
+	}
 }
-
