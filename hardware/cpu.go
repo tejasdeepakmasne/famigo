@@ -1,7 +1,5 @@
 package hardware
 
-// TODO: implement ADC, SBC
-
 type OpcodeInfo struct {
 	mode   AddressingMode
 	name   string
@@ -269,7 +267,7 @@ func (c *CPU) createTable() {
 	}
 }
 
-func (c *CPU) executeOpcode(initCycles uint64) uint64 {
+func (c *CPU) executeOpcode() uint64 {
 	opcode := c.Read(c.PC)
 	c.PC++
 	info := &OpcodeInfo{
@@ -283,13 +281,13 @@ func (c *CPU) executeOpcode(initCycles uint64) uint64 {
 
 }
 
-func (c *CPU) clock() uint64 {
+func (c *CPU) CpuClock() uint64 {
 	Cycles := c.Cycle
-	Cycles += c.executeOpcode(Cycles)
+	Cycles += c.executeOpcode()
 	return Cycles - c.Cycle
 }
 
-func (c *CPU) reset() {
+func (c *CPU) Reset() {
 	c.PC = c.Read16(RESET_ADDR)
 	c.SP = STACK_TOP
 	c.P |= uint8(U)
@@ -342,11 +340,12 @@ func (c *CPU) push16(value uint16) {
 	c.push(uint8(value & 0xFF))
 }
 
-func NewCPU() *CPU {
-	cpu := &CPU{
-		SP: 0xFD,
-		P:  0x24,
-	}
+func NewCPU() CPU {
+	var cpu CPU
+	cpu.A, cpu.X, cpu.Y = 0, 0, 0
+	cpu.PC = cpu.Read16(0xfffc)
+	cpu.SP = 0xfd
+	cpu.P = 4
 	return cpu
 }
 
